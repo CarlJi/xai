@@ -17,7 +17,7 @@
 package openai
 
 import (
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/openai/openai-go/v3/shared"
@@ -28,8 +28,7 @@ import (
 type params struct {
 	params responses.ResponseNewParams
 	sys    responses.ResponseInputMessageContentListParam
-	msgs   xai.MessageBuilder
-	tools  tools
+	msgs   []xai.MsgBuilder
 }
 
 func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
@@ -37,26 +36,30 @@ func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
 	return p
 }
 
-func (p *params) Messages(v xai.MessageBuilder) xai.ParamBuilder {
+func (p *params) Messages(msgs ...xai.MsgBuilder) xai.ParamBuilder {
 	// we will merge system prompt and messages into input param in buildParams
 	// so we just store the messages here
-	p.msgs = v
+	p.msgs = msgs
 	return p
 }
 
-func (p *params) Tools(tools ...any) xai.ParamBuilder {
-	p.params.Tools = buildTools(p.tools, tools)
-	return p
-}
-
-func (p *params) MaxTokens(v int64) xai.ParamBuilder {
-	p.params.MaxOutputTokens = param.NewOpt(v)
+func (p *params) Tools(tools ...xai.ToolBase) xai.ParamBuilder {
+	p.params.Tools = buildTools(tools)
 	return p
 }
 
 func (p *params) Model(model xai.Model) xai.ParamBuilder {
 	p.params.Model = shared.ResponsesModel(model) // TODO(xsw): validate model
 	return p
+}
+
+func (p *params) MaxOutputTokens(v int64) xai.ParamBuilder {
+	p.params.MaxOutputTokens = param.NewOpt(v)
+	return p
+}
+
+func (p *params) Compact(maxInputTokens int64) xai.ParamBuilder {
+	panic("todo")
 }
 
 func (p *params) Container(v string) xai.ParamBuilder {
@@ -82,8 +85,8 @@ func (p *params) TopP(v float64) xai.ParamBuilder {
 	return p
 }
 
-func (p *Provider) Params() xai.ParamBuilder {
-	return &params{tools: p.tools}
+func (p *Service) Params() xai.ParamBuilder {
+	return &params{}
 }
 
 func buildParams(in xai.ParamBuilder) responses.ResponseNewParams {

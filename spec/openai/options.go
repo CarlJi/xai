@@ -14,45 +14,33 @@
  * limitations under the License.
  */
 
-package claude
+package openai
 
 import (
-	"iter"
-
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
+	"github.com/openai/openai-go/v3/option"
 )
 
 // -----------------------------------------------------------------------------
 
-type response struct {
-	msg *anthropic.BetaMessage
+type options struct {
+	opts []option.RequestOption
 }
 
-func (p response) Len() int {
-	return 1
-}
-
-func (p response) At(i int) xai.Candidate {
-	if i != 0 {
-		panic("response.At: index out of range")
-	}
+func (p *options) WithBaseURL(base string) xai.OptionBuilder {
+	p.opts = append(p.opts, option.WithBaseURL(base))
 	return p
 }
 
-func (p response) AsContent() xai.ContentBuilder {
-	content := make([]anthropic.BetaContentBlockParamUnion, len(p.msg.Content))
-	for i, c := range p.msg.Content {
-		content[i] = c.ToParam()
-	}
-	return &contentBuilder{content}
+func (p *Service) Options() xai.OptionBuilder {
+	return &options{}
 }
 
-// -----------------------------------------------------------------------------
-
-func buildRespIter(stream *ssestream.Stream[anthropic.BetaRawMessageStreamEventUnion]) iter.Seq2[xai.GenResponse, error] {
-	panic("todo")
+func buildOptions(opts xai.OptionBuilder) (ret []option.RequestOption) {
+	if p, ok := opts.(*options); ok {
+		ret = p.opts
+	}
+	return
 }
 
 // -----------------------------------------------------------------------------

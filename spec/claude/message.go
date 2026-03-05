@@ -18,55 +18,49 @@ package claude
 
 import (
 	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 )
 
 // -----------------------------------------------------------------------------
 
 type msgBuilder struct {
-	msgs []anthropic.BetaMessageParam
-}
-
-func (p *msgBuilder) User(content xai.ContentBuilder) xai.MessageBuilder {
-	p.msgs = append(p.msgs, anthropic.NewBetaUserMessage(buildContents(content)...))
-	return p
-}
-
-func (p *msgBuilder) Assistant(content xai.ContentBuilder) xai.MessageBuilder {
-	p.msgs = append(p.msgs, anthropic.BetaMessageParam{
-		Role:    anthropic.BetaMessageParamRoleAssistant,
-		Content: buildContents(content),
-	})
-	return p
-}
-
-func (p *Provider) Messages() xai.MessageBuilder {
-	return &msgBuilder{}
-}
-
-func buildMessages(in xai.MessageBuilder) []anthropic.BetaMessageParam {
-	return in.(*msgBuilder).msgs
-}
-
-// -----------------------------------------------------------------------------
-
-type contentBuilder struct {
 	content []anthropic.BetaContentBlockParamUnion
+	role    anthropic.BetaMessageParamRole
 }
 
-func (p *contentBuilder) Text(text string) xai.ContentBuilder {
+func buildMessages(msgs []xai.MsgBuilder) []anthropic.BetaMessageParam {
+	ret := make([]anthropic.BetaMessageParam, len(msgs))
+	for i, msg := range msgs {
+		m := msg.(*msgBuilder)
+		ret[i] = anthropic.BetaMessageParam{
+			Content: m.content,
+			Role:    m.role,
+		}
+	}
+	return ret
+}
+
+func (p *Service) UserMsg() xai.MsgBuilder {
+	return &msgBuilder{role: anthropic.BetaMessageParamRoleUser}
+}
+
+func (p *Service) AssistantMsg() xai.MsgBuilder {
+	return &msgBuilder{role: anthropic.BetaMessageParamRoleAssistant}
+}
+
+func (p *msgBuilder) Text(text string) xai.MsgBuilder {
 	p.content = append(p.content, anthropic.NewBetaTextBlock(text))
 	return p
 }
 
-func (p *contentBuilder) Image(image xai.ImageData) xai.ContentBuilder {
+func (p *msgBuilder) Image(image xai.ImageData) xai.MsgBuilder {
 	p.content = append(p.content, anthropic.NewBetaImageBlock(
 		*(*anthropic.BetaBase64ImageSourceParam)(image.(*imageData)),
 	))
 	return p
 }
 
-func (p *contentBuilder) ImageURL(mime xai.ImageType, url string) xai.ContentBuilder {
+func (p *msgBuilder) ImageURL(mime xai.ImageType, url string) xai.MsgBuilder {
 	p.content = append(p.content, anthropic.NewBetaImageBlock(
 		anthropic.BetaURLImageSourceParam{
 			URL: url,
@@ -75,7 +69,7 @@ func (p *contentBuilder) ImageURL(mime xai.ImageType, url string) xai.ContentBui
 	return p
 }
 
-func (p *contentBuilder) ImageFile(mime xai.ImageType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) ImageFile(mime xai.ImageType, fileID string) xai.MsgBuilder {
 	p.content = append(p.content, anthropic.NewBetaImageBlock(
 		anthropic.BetaFileImageSourceParam{
 			FileID: fileID,
@@ -84,12 +78,12 @@ func (p *contentBuilder) ImageFile(mime xai.ImageType, fileID string) xai.Conten
 	return p
 }
 
-func (p *contentBuilder) Doc(doc xai.DocumentData) xai.ContentBuilder {
+func (p *msgBuilder) Doc(doc xai.DocumentData) xai.MsgBuilder {
 	p.content = append(p.content, (doc.(*docData).data))
 	return p
 }
 
-func (p *contentBuilder) DocURL(mime xai.DocumentType, url string) xai.ContentBuilder {
+func (p *msgBuilder) DocURL(mime xai.DocumentType, url string) xai.MsgBuilder {
 	if mime != xai.DocPDF {
 		panic("todo")
 	}
@@ -99,29 +93,32 @@ func (p *contentBuilder) DocURL(mime xai.DocumentType, url string) xai.ContentBu
 	return p
 }
 
-func (p *contentBuilder) DocFile(mime xai.DocumentType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) DocFile(mime xai.DocumentType, fileID string) xai.MsgBuilder {
 	p.content = append(p.content, anthropic.NewBetaDocumentBlock(anthropic.BetaFileDocumentSourceParam{
 		FileID: fileID,
 	}))
 	return p
 }
 
-func (p *contentBuilder) Thinking(signature, thinking string) xai.ContentBuilder {
-	p.content = append(p.content, anthropic.NewBetaThinkingBlock(signature, thinking))
+func (p *msgBuilder) Part(part xai.Part) xai.MsgBuilder {
+	p.content = append(p.content, buildPart(part))
 	return p
 }
 
-func (p *contentBuilder) RedactedThinking(data string) xai.ContentBuilder {
-	p.content = append(p.content, anthropic.NewBetaRedactedThinkingBlock(data))
+func (p *msgBuilder) Thinking(v xai.Thinking) xai.MsgBuilder {
+	var content anthropic.BetaContentBlockParamUnion
+	if v.Redacted {
+		content = anthropic.NewBetaThinkingBlock(v.Signature, v.Text)
+	} else {
+		content = anthropic.NewBetaRedactedThinkingBlock(v.Signature)
+	}
+	p.content = append(p.content, content)
 	return p
 }
 
-func (p *Provider) Contents() xai.ContentBuilder {
-	return &contentBuilder{}
-}
-
-func buildContents(in xai.ContentBuilder) []anthropic.BetaContentBlockParamUnion {
-	return in.(*contentBuilder).content
+func (p *msgBuilder) Compaction(data string) xai.MsgBuilder {
+	p.content = append(p.content, anthropic.NewBetaCompactionBlock(data))
+	return p
 }
 
 // -----------------------------------------------------------------------------
@@ -135,8 +132,15 @@ func (p *textBuilder) Text(text string) xai.TextBuilder {
 	return p
 }
 
-func (p *Provider) Texts() xai.TextBuilder {
-	return &textBuilder{}
+func (p *Service) Texts(texts ...string) xai.TextBuilder {
+	var content []anthropic.BetaTextBlockParam
+	if len(texts) > 0 {
+		content = make([]anthropic.BetaTextBlockParam, len(texts))
+		for i, text := range texts {
+			content[i].Text = text
+		}
+	}
+	return &textBuilder{content: content}
 }
 
 func buildTexts(in xai.TextBuilder) []anthropic.BetaTextBlockParam {

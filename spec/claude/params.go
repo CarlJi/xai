@@ -19,14 +19,13 @@ package claude
 import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 )
 
 // -----------------------------------------------------------------------------
 
 type params struct {
 	params anthropic.BetaMessageNewParams
-	tools  tools
 }
 
 func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
@@ -34,23 +33,37 @@ func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
 	return p
 }
 
-func (p *params) Messages(v xai.MessageBuilder) xai.ParamBuilder {
-	p.params.Messages = buildMessages(v)
+func (p *params) Messages(msgs ...xai.MsgBuilder) xai.ParamBuilder {
+	p.params.Messages = buildMessages(msgs)
 	return p
 }
 
-func (p *params) Tools(tools ...any) xai.ParamBuilder {
-	p.params.Tools = buildTools(p.tools, tools)
-	return p
-}
-
-func (p *params) MaxTokens(v int64) xai.ParamBuilder {
-	p.params.MaxTokens = v
+func (p *params) Tools(tools ...xai.ToolBase) xai.ParamBuilder {
+	p.params.Tools = buildTools(tools)
 	return p
 }
 
 func (p *params) Model(model xai.Model) xai.ParamBuilder {
 	p.params.Model = anthropic.Model(model) // TODO(xsw): validate model
+	return p
+}
+
+func (p *params) MaxOutputTokens(v int64) xai.ParamBuilder {
+	p.params.MaxTokens = v
+	return p
+}
+
+func (p *params) Compact(maxInputTokens int64) xai.ParamBuilder {
+	p.params.Betas = []anthropic.AnthropicBeta{
+		"compact-2026-01-12",
+	}
+	p.params.ContextManagement.Edits = append(p.params.ContextManagement.Edits, anthropic.BetaContextManagementConfigEditUnionParam{
+		OfCompact20260112: &anthropic.BetaCompact20260112EditParam{
+			Trigger: anthropic.BetaInputTokensTriggerParam{
+				Value: maxInputTokens,
+			},
+		},
+	})
 	return p
 }
 
@@ -83,8 +96,8 @@ func (p *params) TopP(v float64) xai.ParamBuilder {
 	return p
 }
 
-func (p *Provider) Params() xai.ParamBuilder {
-	return &params{tools: p.tools}
+func (p *Service) Params() xai.ParamBuilder {
+	return &params{}
 }
 
 func buildParams(in xai.ParamBuilder) anthropic.BetaMessageNewParams {

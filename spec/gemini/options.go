@@ -14,41 +14,32 @@
  * limitations under the License.
  */
 
-package openai
+package gemini
 
 import (
-	"iter"
-
-	"github.com/goplus/xai"
-	"github.com/openai/openai-go/v3/packages/ssestream"
-	"github.com/openai/openai-go/v3/responses"
+	xai "github.com/goplus/xai/spec"
+	"google.golang.org/genai"
 )
 
 // -----------------------------------------------------------------------------
 
-type response struct {
-	msg *responses.Response
+type options struct {
+	opts genai.HTTPOptions
 }
 
-func (p response) Len() int {
-	return 1
-}
-
-func (p response) At(i int) xai.Candidate {
-	if i != 0 {
-		panic("response.At: index out of range")
-	}
+func (p *options) WithBaseURL(base string) xai.OptionBuilder {
+	p.opts.BaseURL = base
 	return p
 }
 
-func (p response) AsContent() xai.ContentBuilder {
-	panic("todo")
+func (p *Service) Options() xai.OptionBuilder {
+	return &options{}
 }
 
-// -----------------------------------------------------------------------------
-
-func buildRespIter(stream *ssestream.Stream[responses.ResponseStreamEventUnion]) iter.Seq2[xai.GenResponse, error] {
-	panic("todo")
+func buildOptions(conf *genai.GenerateContentConfig, opts xai.OptionBuilder) {
+	if p, ok := opts.(*options); ok {
+		conf.HTTPOptions = &p.opts
+	}
 }
 
 // -----------------------------------------------------------------------------

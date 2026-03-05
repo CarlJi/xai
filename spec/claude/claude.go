@@ -24,21 +24,17 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/goplus/xai"
-)
-
-var (
-	_ xai.Provider = (*Provider)(nil)
+	xai "github.com/goplus/xai/spec"
 )
 
 // -----------------------------------------------------------------------------
 
-type Provider struct {
+type Service struct {
 	messages anthropic.BetaMessageService
 	tools    tools
 }
 
-func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
+func (p *Service) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
 	resp, err := p.messages.New(ctx, buildParams(params), buildOptions(opts)...)
 	if err != nil {
 		return nil, err // TODO(xsw): translate error
@@ -46,7 +42,7 @@ func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.Op
 	return response{resp}, nil
 }
 
-func (p *Provider) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
+func (p *Service) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
 	resp := p.messages.NewStreaming(ctx, buildParams(params), buildOptions(opts)...)
 	return buildRespIter(resp)
 }
@@ -57,21 +53,33 @@ const (
 	Scheme = "claude"
 )
 
-// New creates a new Provider instance based on the scheme in the given URI.
-// uri should be in the format of "claude:base=xxx", where "base" is the base URL
-// of the API endpoint.
+// New creates a new Service instance based on the scheme in the given URI.
+// uri should be in the format of "claude:base=service_base_url&key=api_key".
 //
-// For example, "claude:base=https://api.anthropic.com".
-func New(ctx context.Context, uri string) (xai.Provider, error) {
+// `base` is the base URL of the API endpoint.
+// `key` is the API key for authentication (don't use both `key` and `token`).
+// `token` is the authentication token for the API requests.
+//
+// For example, "claude:base=https://api.anthropic.com/&key=your_api_key".
+func New(ctx context.Context, uri string) (xai.Service, error) {
 	params, err := url.ParseQuery(strings.TrimPrefix(uri, Scheme+":"))
 	if err != nil {
 		return nil, err
 	}
-	var opts []option.RequestOption
+	// Remove calls to anthropic.DefaultClientOptions because we don't suggest users
+	// to set environment variables for API key and base URL. Instead, they should
+	// provide these parameters directly in the URI.
+	opts := []option.RequestOption{option.WithEnvironmentProduction()}
 	if base := params["base"]; len(base) > 0 {
 		opts = append(opts, option.WithBaseURL(base[0]))
 	}
-	return &Provider{
+	if key := params["key"]; len(key) > 0 {
+		opts = append(opts, option.WithAPIKey(key[0]))
+	}
+	if token := params["token"]; len(token) > 0 {
+		opts = append(opts, option.WithAuthToken(token[0]))
+	}
+	return &Service{
 		messages: anthropic.NewBetaMessageService(opts...),
 		tools:    make(tools),
 	}, nil

@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-package openai
+package claude
 
 import (
-	"github.com/goplus/xai"
-	"github.com/openai/openai-go/v3/option"
+	"github.com/anthropics/anthropic-sdk-go/option"
+	xai "github.com/goplus/xai/spec"
 )
 
 // -----------------------------------------------------------------------------
@@ -32,7 +32,7 @@ func (p *options) WithBaseURL(base string) xai.OptionBuilder {
 	return p
 }
 
-func (p *Provider) Options() xai.OptionBuilder {
+func (p *Service) Options() xai.OptionBuilder {
 	return &options{}
 }
 

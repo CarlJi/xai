@@ -22,23 +22,19 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
 )
 
-var (
-	_ xai.Provider = (*Provider)(nil)
-)
-
 // -----------------------------------------------------------------------------
 
-type Provider struct {
+type Service struct {
 	responses responses.ResponseService
 	tools     tools
 }
 
-func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
+func (p *Service) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
 	resp, err := p.responses.New(ctx, buildParams(params), buildOptions(opts)...)
 	if err != nil {
 		return nil, err // TODO(xsw): translate error
@@ -46,7 +42,7 @@ func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.Op
 	return response{resp}, nil
 }
 
-func (p *Provider) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
+func (p *Service) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
 	resp := p.responses.NewStreaming(ctx, buildParams(params), buildOptions(opts)...)
 	return buildRespIter(resp)
 }
@@ -57,21 +53,41 @@ const (
 	Scheme = "openai"
 )
 
-// New creates a new Provider instance based on the scheme in the given URI.
-// uri should be in the format of "openai:base=xxx", where "base" is the base URL
-// of the API endpoint.
+// New creates a new Service instance based on the scheme in the given URI.
+// uri should be in the format of "openai:base=service_base_url&key=api_key".
 //
-// For example, "openai:base=https://api.openai.com".
-func New(ctx context.Context, uri string) (xai.Provider, error) {
+// `base` is the base URL of the API endpoint.
+// `key` is the API key for authentication.
+// `org` is the organization ID to use for the API requests.
+// `project` is the project ID to use for the API requests.
+// `webhook_secret` is the secret for validating webhook requests.
+//
+// For example, "openai:base=https://api.openai.com/v1/&key=your_api_key".
+func New(ctx context.Context, uri string) (xai.Service, error) {
 	params, err := url.ParseQuery(strings.TrimPrefix(uri, Scheme+":"))
 	if err != nil {
 		return nil, err
 	}
-	var opts []option.RequestOption
+	// Remove calls to openai.DefaultClientOptions because we don't suggest users
+	// to set environment variables for API key and base URL. Instead, they should
+	// provide these parameters directly in the URI.
+	opts := []option.RequestOption{option.WithEnvironmentProduction()}
 	if base := params["base"]; len(base) > 0 {
 		opts = append(opts, option.WithBaseURL(base[0]))
 	}
-	return &Provider{
+	if key := params["key"]; len(key) > 0 {
+		opts = append(opts, option.WithAPIKey(key[0]))
+	}
+	if org := params["org"]; len(org) > 0 {
+		opts = append(opts, option.WithOrganization(org[0]))
+	}
+	if proj := params["project"]; len(proj) > 0 {
+		opts = append(opts, option.WithProject(proj[0]))
+	}
+	if webhookSec := params["webhook_secret"]; len(webhookSec) > 0 {
+		opts = append(opts, option.WithWebhookSecret(webhookSec[0]))
+	}
+	return &Service{
 		responses: responses.NewResponseService(opts...),
 		tools:     make(tools),
 	}, nil

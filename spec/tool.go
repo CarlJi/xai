@@ -37,13 +37,12 @@ type WebSearchResultItem struct {
 	Title   string
 	URL     string
 	PageAge string
-
-	// implementation-specific content that can be used for tool result conversion
-	Underlying any
 }
 
 type WebSearchResult struct {
 	Result []WebSearchResultItem
+
+	Underlying any // for provider-specific extensions
 }
 
 // -----------------------------------------------------------------------------
@@ -83,21 +82,21 @@ type SearchToolBm25Result struct {
 
 // -----------------------------------------------------------------------------
 
-type StdTool interface {
+type ToolBase interface {
 	UnderlyingAssignTo(any) // don't call it directly
 }
 
 type WebSearchTool interface {
-	StdTool
+	ToolBase
 
 	MaxUses(int64) WebSearchTool
 	AllowedDomains(...string) WebSearchTool
 	BlockedDomains(...string) WebSearchTool
 }
 
-// -----------------------------------------------------------------------------
-
 type Tool interface {
+	ToolBase
+
 	Description(string) Tool
 }
 

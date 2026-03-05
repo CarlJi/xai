@@ -21,17 +21,21 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
 
 // -----------------------------------------------------------------------------
 
-type tools map[string]*responses.FunctionToolParam
+type tools map[string]tool
 
 type tool struct {
 	tool *responses.FunctionToolParam
+}
+
+func (p tool) UnderlyingAssignTo(ret any) {
+	ret.(*responses.ToolUnionParam).OfFunction = p.tool
 }
 
 func (p tool) Description(desc string) xai.Tool {
@@ -39,34 +43,23 @@ func (p tool) Description(desc string) xai.Tool {
 	return p
 }
 
-func (p *Provider) ToolIsDefined(name string) bool {
-	_, ok := p.tools[name]
-	return ok
+func (p *Service) Tool(name string) xai.Tool {
+	return p.tools[name]
 }
 
-func (p *Provider) ToolDef(name string) xai.Tool {
-	if p.ToolIsDefined(name) {
+func (p *Service) ToolDef(name string) xai.Tool {
+	if _, ok := p.tools[name]; ok {
 		panic("tool already defined: " + name)
 	}
-	ret := &responses.FunctionToolParam{Name: name}
+	ret := tool{&responses.FunctionToolParam{Name: name}}
 	p.tools[name] = ret
-	return tool{ret}
+	return ret
 }
 
-func buildTools(tools tools, params []any) []responses.ToolUnionParam {
-	ret := make([]responses.ToolUnionParam, len(params))
-	for i, v := range params {
-		var param responses.ToolUnionParam
-		if name, ok := v.(string); ok {
-			tool, ok := tools[name]
-			if !ok {
-				panic("undefined tool: " + name)
-			}
-			param.OfFunction = tool
-		} else {
-			v.(xai.StdTool).UnderlyingAssignTo(&param)
-		}
-		ret[i] = param
+func buildTools(tools []xai.ToolBase) []responses.ToolUnionParam {
+	ret := make([]responses.ToolUnionParam, len(tools))
+	for i, v := range tools {
+		v.UnderlyingAssignTo(&ret[i])
 	}
 	return ret
 }
@@ -96,7 +89,7 @@ func (p webSearchTool) BlockedDomains(v ...string) xai.WebSearchTool {
 	return p
 }
 
-func (p *Provider) WebSearchTool() xai.WebSearchTool {
+func (p *Service) WebSearchTool() xai.WebSearchTool {
 	return webSearchTool{&responses.WebSearchToolParam{
 		Type: "web_search_2025_08_26",
 	}}
@@ -104,15 +97,15 @@ func (p *Provider) WebSearchTool() xai.WebSearchTool {
 
 // -----------------------------------------------------------------------------
 
-func (p *contentBuilder) ToolUse(toolID, name string, input any) xai.ContentBuilder {
+func (p *msgBuilder) ToolUse(v xai.ToolUse) xai.MsgBuilder {
 	var (
 		content responses.ResponseInputItemUnionParam
 	)
-	if strings.HasPrefix(name, "std/") {
+	if strings.HasPrefix(v.Name, "std/") {
 		panic("todo")
 	} else {
-		args := jsonStringify(input, "invalid tool input: ")
-		content = responses.ResponseInputItemParamOfFunctionCall(toolID, args, name)
+		args := jsonStringify(v.Input, "invalid tool input: ")
+		content = responses.ResponseInputItemParamOfFunctionCall(v.ID, args, v.Name)
 	}
 	return p.addNonMsg(content)
 }
@@ -133,30 +126,18 @@ func jsonStringify(v any, errPrompt string) string {
 
 // -----------------------------------------------------------------------------
 
-var stdToolResultConv = map[string]func(toolID string, result any, isError bool) responses.ResponseInputItemUnionParam{
-	xai.ToolWebSearch: webSearchResultConv,
-}
-
-func webSearchResultConv(toolID string, result any, isError bool) responses.ResponseInputItemUnionParam {
-	panic("todo")
-}
-
-func (p *contentBuilder) ToolResult(toolID, name string, result any, isError bool) xai.ContentBuilder {
+func (p *msgBuilder) ToolResult(v xai.ToolResult) xai.MsgBuilder {
 	var (
 		content responses.ResponseInputItemUnionParam
 	)
-	if strings.HasPrefix(name, "std/") {
-		conv, ok := stdToolResultConv[name]
-		if !ok {
-			panic("unsupported standard tool: " + name)
-		}
-		content = conv(toolID, result, isError)
+	if strings.HasPrefix(v.Name, "std/") {
+		panic("todo")
 	} else {
-		if isError {
-			result = map[string]any{"error": result.(error).Error()}
+		if v.IsError {
+			v.Result = map[string]any{"error": v.Result.(error).Error()}
 		}
-		ret := jsonStringify(result, "invalid tool result: ")
-		content = responses.ResponseInputItemParamOfFunctionCallOutput(toolID, ret)
+		ret := jsonStringify(v.Result, "invalid tool result: ")
+		content = responses.ResponseInputItemParamOfFunctionCallOutput(v.ID, ret)
 	}
 	p.content = append(p.content, content)
 	return p

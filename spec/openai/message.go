@@ -17,7 +17,7 @@
 package openai
 
 import (
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -25,53 +25,39 @@ import (
 // -----------------------------------------------------------------------------
 
 type msgBuilder struct {
-	msgs []responses.ResponseInputItemUnionParam
+	content []responses.ResponseInputItemUnionParam
+	msg     *responses.EasyInputMessageParam
+	role    responses.EasyInputMessageRole
 }
 
-func (p *msgBuilder) User(content xai.ContentBuilder) xai.MessageBuilder {
-	p.msgs = append(p.msgs, buildContents(content)...)
-	return p
-}
-
-func (p *msgBuilder) Assistant(content xai.ContentBuilder) xai.MessageBuilder {
-	contents := buildContents(content)
-	for _, c := range contents {
-		if c.OfMessage != nil {
-			c.OfMessage.Role = responses.EasyInputMessageRoleAssistant
-		}
+func buildMessages(in []xai.MsgBuilder, sysPrompt responses.ResponseInputItemUnionParam) (ret responses.ResponseNewParamsInputUnion) {
+	sys := sysPrompt.OfMessage != nil
+	n := len(in)
+	if sys {
+		n++
 	}
-	p.msgs = append(p.msgs, contents...)
-	return p
-}
-
-func (p *Provider) Messages() xai.MessageBuilder {
-	// we reserve the first slot for system prompt, which is optional but commonly used
-	msgs := make([]responses.ResponseInputItemUnionParam, 1, 2)
-	return &msgBuilder{msgs: msgs}
-}
-
-func buildMessages(in xai.MessageBuilder, sys responses.ResponseInputItemUnionParam) (ret responses.ResponseNewParamsInputUnion) {
-	p := in.(*msgBuilder)
-	msgs := p.msgs
-	if sys.OfMessage != nil {
-		msgs[0] = sys // system prompt
-	} else {
-		msgs = msgs[1:]
+	msgs := make([]responses.ResponseInputItemUnionParam, 0, n)
+	if sys {
+		msgs = append(msgs, sysPrompt)
+	}
+	for _, v := range in {
+		msgs = append(msgs, v.(*msgBuilder).content[0])
 	}
 	ret.OfInputItemList = msgs
 	return
 }
 
-// -----------------------------------------------------------------------------
-
-type contentBuilder struct {
-	content []responses.ResponseInputItemUnionParam
-	msg     *responses.EasyInputMessageParam
+func (p *Service) UserMsg() xai.MsgBuilder {
+	return &msgBuilder{role: responses.EasyInputMessageRoleUser}
 }
 
-func (p *contentBuilder) addMsg(v responses.ResponseInputContentUnionParam) xai.ContentBuilder {
+func (p *Service) AssistantMsg() xai.MsgBuilder {
+	return &msgBuilder{role: responses.EasyInputMessageRoleAssistant}
+}
+
+func (p *msgBuilder) addMsg(v responses.ResponseInputContentUnionParam) xai.MsgBuilder {
 	if p.msg == nil {
-		content := responses.ResponseInputItemParamOfMessage(responses.ResponseInputMessageContentListParam{v}, responses.EasyInputMessageRoleUser)
+		content := responses.ResponseInputItemParamOfMessage(responses.ResponseInputMessageContentListParam{v}, p.role)
 		p.content = append(p.content, content)
 		p.msg = content.OfMessage
 	} else {
@@ -80,21 +66,21 @@ func (p *contentBuilder) addMsg(v responses.ResponseInputContentUnionParam) xai.
 	return p
 }
 
-func (p *contentBuilder) addNonMsg(v responses.ResponseInputItemUnionParam) xai.ContentBuilder {
+func (p *msgBuilder) addNonMsg(v responses.ResponseInputItemUnionParam) xai.MsgBuilder {
 	p.content = append(p.content, v)
 	p.msg = nil
 	return p
 }
 
-func (p *contentBuilder) Text(text string) xai.ContentBuilder {
+func (p *msgBuilder) Text(text string) xai.MsgBuilder {
 	return p.addMsg(responses.ResponseInputContentParamOfInputText(text))
 }
 
-func (p *contentBuilder) Image(image xai.ImageData) xai.ContentBuilder {
+func (p *msgBuilder) Image(image xai.ImageData) xai.MsgBuilder {
 	panic("todo")
 }
 
-func (p *contentBuilder) ImageURL(mime xai.ImageType, url string) xai.ContentBuilder {
+func (p *msgBuilder) ImageURL(mime xai.ImageType, url string) xai.MsgBuilder {
 	return p.addMsg(responses.ResponseInputContentUnionParam{
 		OfInputImage: &responses.ResponseInputImageParam{
 			ImageURL: param.NewOpt(url),
@@ -102,7 +88,7 @@ func (p *contentBuilder) ImageURL(mime xai.ImageType, url string) xai.ContentBui
 	})
 }
 
-func (p *contentBuilder) ImageFile(mime xai.ImageType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) ImageFile(mime xai.ImageType, fileID string) xai.MsgBuilder {
 	return p.addMsg(responses.ResponseInputContentUnionParam{
 		OfInputImage: &responses.ResponseInputImageParam{
 			FileID: param.NewOpt(fileID),
@@ -110,11 +96,11 @@ func (p *contentBuilder) ImageFile(mime xai.ImageType, fileID string) xai.Conten
 	})
 }
 
-func (p *contentBuilder) Doc(doc xai.DocumentData) xai.ContentBuilder {
+func (p *msgBuilder) Doc(doc xai.DocumentData) xai.MsgBuilder {
 	panic("todo")
 }
 
-func (p *contentBuilder) DocURL(mime xai.DocumentType, url string) xai.ContentBuilder {
+func (p *msgBuilder) DocURL(mime xai.DocumentType, url string) xai.MsgBuilder {
 	return p.addMsg(responses.ResponseInputContentUnionParam{
 		OfInputFile: &responses.ResponseInputFileParam{
 			FileURL: param.NewOpt(url),
@@ -122,7 +108,7 @@ func (p *contentBuilder) DocURL(mime xai.DocumentType, url string) xai.ContentBu
 	})
 }
 
-func (p *contentBuilder) DocFile(mime xai.DocumentType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) DocFile(mime xai.DocumentType, fileID string) xai.MsgBuilder {
 	return p.addMsg(responses.ResponseInputContentUnionParam{
 		OfInputFile: &responses.ResponseInputFileParam{
 			FileID: param.NewOpt(fileID),
@@ -130,27 +116,27 @@ func (p *contentBuilder) DocFile(mime xai.DocumentType, fileID string) xai.Conte
 	})
 }
 
-func (p *contentBuilder) Thinking(signature, thinking string) xai.ContentBuilder {
+func (p *msgBuilder) Part(part xai.Part) xai.MsgBuilder {
+	p.content = append(p.content, buildPart(part))
+	return p
+}
+
+func (p *msgBuilder) Thinking(v xai.Thinking) xai.MsgBuilder {
+	if v.Redacted {
+		panic("todo")
+	}
 	return p.addNonMsg(responses.ResponseInputItemUnionParam{
 		OfReasoning: &responses.ResponseReasoningItemParam{
-			ID: signature,
+			ID: v.Signature,
 			Content: []responses.ResponseReasoningItemContentParam{
-				{Text: thinking},
+				{Text: v.Text},
 			},
 		},
 	})
 }
 
-func (p *contentBuilder) RedactedThinking(data string) xai.ContentBuilder {
-	panic("todo")
-}
-
-func (p *Provider) Contents() xai.ContentBuilder {
-	return &contentBuilder{}
-}
-
-func buildContents(in xai.ContentBuilder) []responses.ResponseInputItemUnionParam {
-	return in.(*contentBuilder).content
+func (p *msgBuilder) Compaction(data string) xai.MsgBuilder {
+	return p.addNonMsg(responses.ResponseInputItemParamOfCompaction(data))
 }
 
 // -----------------------------------------------------------------------------
@@ -164,8 +150,15 @@ func (p *textBuilder) Text(text string) xai.TextBuilder {
 	return p
 }
 
-func (p *Provider) Texts() xai.TextBuilder {
-	return &textBuilder{}
+func (p *Service) Texts(texts ...string) xai.TextBuilder {
+	var content responses.ResponseInputMessageContentListParam
+	if len(texts) > 0 {
+		content = make(responses.ResponseInputMessageContentListParam, len(texts))
+		for i, text := range texts {
+			content[i] = responses.ResponseInputContentParamOfInputText(text)
+		}
+	}
+	return &textBuilder{content: content}
 }
 
 func buildTexts(in xai.TextBuilder) responses.ResponseInputMessageContentListParam {

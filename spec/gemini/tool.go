@@ -20,16 +20,20 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"google.golang.org/genai"
 )
 
 // -----------------------------------------------------------------------------
 
-type tools map[string]*genai.FunctionDeclaration
+type tools map[string]tool
 
 type tool struct {
 	tool *genai.FunctionDeclaration
+}
+
+func (p tool) UnderlyingAssignTo(ret any) {
+	ret.(*genai.Tool).FunctionDeclarations = []*genai.FunctionDeclaration{p.tool}
 }
 
 func (p tool) Description(desc string) xai.Tool {
@@ -37,34 +41,23 @@ func (p tool) Description(desc string) xai.Tool {
 	return p
 }
 
-func (p *Provider) ToolIsDefined(name string) bool {
-	_, ok := p.tools[name]
-	return ok
+func (p *Service) Tool(name string) xai.Tool {
+	return p.tools[name]
 }
 
-func (p *Provider) ToolDef(name string) xai.Tool {
-	if p.ToolIsDefined(name) {
+func (p *Service) ToolDef(name string) xai.Tool {
+	if _, ok := p.tools[name]; ok {
 		panic("tool already defined: " + name)
 	}
-	ret := &genai.FunctionDeclaration{Name: name}
+	ret := tool{&genai.FunctionDeclaration{Name: name}}
 	p.tools[name] = ret
-	return tool{ret}
+	return ret
 }
 
-func buildTools(tools tools, params []any) []*genai.Tool {
-	ret := make([]*genai.Tool, len(params))
-	for i, v := range params {
-		var param genai.Tool
-		if name, ok := v.(string); ok {
-			tool, ok := tools[name]
-			if !ok {
-				panic("undefined tool: " + name)
-			}
-			param.FunctionDeclarations = []*genai.FunctionDeclaration{tool}
-		} else {
-			v.(xai.StdTool).UnderlyingAssignTo(&param)
-		}
-		ret[i] = &param
+func buildTools(tools []xai.ToolBase) []*genai.Tool {
+	ret := make([]*genai.Tool, len(tools))
+	for i, v := range tools {
+		v.UnderlyingAssignTo(&ret[i])
 	}
 	return ret
 }
@@ -94,21 +87,21 @@ func (p webSearchTool) BlockedDomains(v ...string) xai.WebSearchTool {
 	return p
 }
 
-func (p *Provider) WebSearchTool() xai.WebSearchTool {
+func (p *Service) WebSearchTool() xai.WebSearchTool {
 	return webSearchTool{&genai.GoogleSearch{}}
 }
 
 // -----------------------------------------------------------------------------
 
-func (p *contentBuilder) ToolUse(toolID, name string, input any) xai.ContentBuilder {
+func (p *msgBuilder) ToolUse(v xai.ToolUse) xai.MsgBuilder {
 	var (
 		content *genai.Part
 	)
-	if strings.HasPrefix(name, "std/") {
+	if strings.HasPrefix(v.Name, "std/") {
 		panic("todo")
 	} else {
-		args := dataConv(input, "invalid tool input: ")
-		content = genai.NewPartFromFunctionCall(name, args)
+		args := dataConv(v.Input, "invalid tool input: ")
+		content = genai.NewPartFromFunctionCall(v.Name, args)
 	}
 	p.content = append(p.content, content)
 	return p
@@ -136,33 +129,26 @@ func dataConv(input any, errPrompt string) map[string]any {
 
 // -----------------------------------------------------------------------------
 
-var stdToolResultConv = map[string]func(toolID string, result any, isError bool) *genai.Part{
-	xai.ToolWebSearch: webSearchResultConv,
-}
-
-func webSearchResultConv(toolID string, result any, isError bool) *genai.Part {
-	// genai.GoogleSearch
-	panic("todo")
-}
-
-func (p *contentBuilder) ToolResult(toolID, name string, result any, isError bool) xai.ContentBuilder {
+func (p *msgBuilder) ToolResult(v xai.ToolResult) xai.MsgBuilder {
 	var (
 		content *genai.Part
 	)
-	if strings.HasPrefix(name, "std/") {
-		conv, ok := stdToolResultConv[name]
-		if !ok {
-			panic("unsupported standard tool: " + name)
-		}
-		content = conv(toolID, result, isError)
+	if strings.HasPrefix(v.Name, "std/") {
+		panic("todo")
 	} else {
 		var ret map[string]any
-		if isError {
-			ret = map[string]any{"error": result.(error).Error()}
+		if v.IsError {
+			ret = map[string]any{"error": v.Result.(error).Error()}
 		} else {
-			ret = dataConv(result, "invalid tool result: ")
+			ret = dataConv(v.Result, "invalid tool result: ")
 		}
-		content = genai.NewPartFromFunctionResponse(name, ret)
+		content = &genai.Part{
+			FunctionResponse: &genai.FunctionResponse{
+				ID:       v.ID,
+				Name:     v.Name,
+				Response: ret,
+			},
+		}
 	}
 	p.content = append(p.content, content)
 	return p

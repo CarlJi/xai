@@ -17,7 +17,7 @@
 package gemini
 
 import (
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"google.golang.org/genai"
 )
 
@@ -27,7 +27,6 @@ type params struct {
 	model    string
 	contents []*genai.Content
 	config   genai.GenerateContentConfig
-	tools    tools
 }
 
 func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
@@ -35,23 +34,28 @@ func (p *params) System(v xai.TextBuilder) xai.ParamBuilder {
 	return p
 }
 
-func (p *params) Messages(v xai.MessageBuilder) xai.ParamBuilder {
-	p.contents = buildMessages(v)
+func (p *params) Messages(msgs ...xai.MsgBuilder) xai.ParamBuilder {
+	p.contents = buildMessages(msgs)
 	return p
 }
 
-func (p *params) Tools(tools ...any) xai.ParamBuilder {
-	p.config.Tools = buildTools(p.tools, tools)
-	return p
-}
-
-func (p *params) MaxTokens(v int64) xai.ParamBuilder {
-	p.config.MaxOutputTokens = int32(v)
+func (p *params) Tools(tools ...xai.ToolBase) xai.ParamBuilder {
+	p.config.Tools = buildTools(tools)
 	return p
 }
 
 func (p *params) Model(model xai.Model) xai.ParamBuilder {
 	p.model = string(model) // TODO(xsw): validate model
+	return p
+}
+
+func (p *params) MaxOutputTokens(v int64) xai.ParamBuilder {
+	p.config.MaxOutputTokens = int32(v)
+	return p
+}
+
+func (p *params) Compact(maxInputTokens int64) xai.ParamBuilder {
+	// gemini does not support compaction, so we just ignore this parameter for now.
 	return p
 }
 
@@ -80,8 +84,8 @@ func (p *params) TopP(v float64) xai.ParamBuilder {
 	return p
 }
 
-func (p *Provider) Params() xai.ParamBuilder {
-	return &params{tools: p.tools}
+func (p *Service) Params() xai.ParamBuilder {
+	return &params{}
 }
 
 func buildParams(in xai.ParamBuilder) (string, []*genai.Content, *genai.GenerateContentConfig) {

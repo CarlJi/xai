@@ -20,24 +20,21 @@ import (
 	"context"
 	"iter"
 	"net/url"
+	"reflect"
 	"strings"
 
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"google.golang.org/genai"
-)
-
-var (
-	_ xai.Provider = (*Provider)(nil)
 )
 
 // -----------------------------------------------------------------------------
 
-type Provider struct {
+type Service struct {
 	models genai.Models
 	tools  tools
 }
 
-func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
+func (p *Service) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) (xai.GenResponse, error) {
 	model, contents, config := buildParams(params)
 	buildOptions(config, opts)
 	resp, err := p.models.GenerateContent(ctx, model, contents, config)
@@ -47,7 +44,7 @@ func (p *Provider) Gen(ctx context.Context, params xai.ParamBuilder, opts xai.Op
 	return response{resp}, nil
 }
 
-func (p *Provider) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
+func (p *Service) GenStream(ctx context.Context, params xai.ParamBuilder, opts xai.OptionBuilder) iter.Seq2[xai.GenResponse, error] {
 	model, contents, config := buildParams(params)
 	buildOptions(config, opts)
 	iter := p.models.GenerateContentStream(ctx, model, contents, config)
@@ -64,33 +61,57 @@ const (
 	Scheme = "gemini"
 )
 
-// New creates a new Provider instance based on the scheme in the given URI.
-// uri should be in the format of "gemini:base=xxx&project=xxx", where "base" is
-// the base URL of the API endpoint. "project" is the project ID, which is required
-// when using the Vertex AI.
+// New creates a new Service instance based on the scheme in the given URI.
+// uri should be in the format of "gemini:base=service_base_url&key=api_key".
 //
-// For example, "gemini:base=https://generativelanguage.googleapis.com".
-func New(ctx context.Context, uri string) (xai.Provider, error) {
+// `base` is the base URL of the API endpoint.
+// `key` is the API key for authentication for Gemini backend.
+// `project` is the project ID for Vertex AI backend.
+// `location` is the location for Vertex AI backend.
+//
+// For example, "gemini:base=https://generativelanguage.googleapis.com/&key=your_api_key".
+func New(ctx context.Context, uri string) (xai.Service, error) {
 	params, err := url.ParseQuery(strings.TrimPrefix(uri, Scheme+":"))
 	if err != nil {
 		return nil, err
 	}
 	var conf genai.ClientConfig
+	setNilEnvVarProvider(&conf)
 	if base := params["base"]; len(base) > 0 {
 		conf.HTTPOptions.BaseURL = base[0]
+	}
+	if key := params["key"]; len(key) > 0 {
+		conf.APIKey = key[0]
 	}
 	if project := params["project"]; len(project) > 0 {
 		conf.Project = project[0]
 		conf.Backend = genai.BackendVertexAI
 	}
+	if location := params["location"]; len(location) > 0 {
+		conf.Location = location[0]
+	}
 	cli, err := genai.NewClient(ctx, &conf)
 	if err != nil {
 		return nil, err
 	}
-	return &Provider{
+	return &Service{
 		models: *cli.Models,
 		tools:  make(tools),
 	}, nil
+}
+
+// Remove calls to genai.defaultEnvVarProvider because we don't suggest users
+// to set environment variables for API key and base URL. Instead, they should
+// provide these parameters directly in the URI.
+func setNilEnvVarProvider(conf *genai.ClientConfig) {
+	v := reflect.ValueOf(conf).Elem().FieldByName("envVarProvider")
+	if v.IsValid() {
+		*(*func() map[string]string)(v.Addr().UnsafePointer()) = nilEnvVarProvider
+	}
+}
+
+func nilEnvVarProvider() map[string]string {
+	return nil
 }
 
 func init() {

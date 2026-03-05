@@ -19,115 +19,98 @@ package gemini
 import (
 	"unsafe"
 
-	"github.com/goplus/xai"
+	xai "github.com/goplus/xai/spec"
 	"google.golang.org/genai"
 )
 
 // -----------------------------------------------------------------------------
 
 type msgBuilder struct {
-	msgs []*genai.Content
-}
-
-func (p *msgBuilder) User(content xai.ContentBuilder) xai.MessageBuilder {
-	parts := buildContents(content)
-	p.msgs = append(p.msgs, &genai.Content{
-		Parts: parts,
-		Role:  genai.RoleUser,
-	})
-	return p
-}
-
-func (p *msgBuilder) Assistant(content xai.ContentBuilder) xai.MessageBuilder {
-	parts := buildContents(content)
-	p.msgs = append(p.msgs, &genai.Content{
-		Parts: parts,
-		Role:  genai.RoleModel,
-	})
-	return p
-}
-
-func (p *Provider) Messages() xai.MessageBuilder {
-	return &msgBuilder{}
-}
-
-func buildMessages(in xai.MessageBuilder) []*genai.Content {
-	p := in.(*msgBuilder)
-	return p.msgs
-}
-
-// -----------------------------------------------------------------------------
-
-type contentBuilder struct {
 	content []*genai.Part
+	role    string
 }
 
-func (p *contentBuilder) Text(text string) xai.ContentBuilder {
+func buildMessages(msgs []xai.MsgBuilder) []*genai.Content {
+	ret := make([]*genai.Content, len(msgs))
+	for i, msg := range msgs {
+		m := msg.(*msgBuilder)
+		ret[i] = &genai.Content{
+			Parts: m.content,
+			Role:  m.role,
+		}
+	}
+	return ret
+}
+
+func (p *Service) UserMsg() xai.MsgBuilder {
+	return &msgBuilder{role: genai.RoleUser}
+}
+
+func (p *Service) AssistantMsg() xai.MsgBuilder {
+	return &msgBuilder{role: genai.RoleModel}
+}
+
+func (p *msgBuilder) Text(text string) xai.MsgBuilder {
 	p.content = append(p.content, genai.NewPartFromText(text))
 	return p
 }
 
-func (p *contentBuilder) Image(image xai.ImageData) xai.ContentBuilder {
+func (p *msgBuilder) Image(image xai.ImageData) xai.MsgBuilder {
 	p.content = append(p.content, &genai.Part{
 		InlineData: (*genai.Blob)(image.(*imageData)),
 	})
 	return p
 }
 
-func (p *contentBuilder) ImageURL(mime xai.ImageType, url string) xai.ContentBuilder {
+func (p *msgBuilder) ImageURL(mime xai.ImageType, url string) xai.MsgBuilder {
 	p.content = append(p.content, genai.NewPartFromURI(
 		url, string(mime),
 	))
 	return p
 }
 
-func (p *contentBuilder) ImageFile(mime xai.ImageType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) ImageFile(mime xai.ImageType, fileID string) xai.MsgBuilder {
 	p.content = append(p.content, genai.NewPartFromURI(
 		fileID, string(mime),
 	))
 	return p
 }
 
-func (p *contentBuilder) Doc(doc xai.DocumentData) xai.ContentBuilder {
+func (p *msgBuilder) Doc(doc xai.DocumentData) xai.MsgBuilder {
 	p.content = append(p.content, (*genai.Part)(doc.(*docData)))
 	return p
 }
 
-func (p *contentBuilder) DocURL(mime xai.DocumentType, url string) xai.ContentBuilder {
+func (p *msgBuilder) DocURL(mime xai.DocumentType, url string) xai.MsgBuilder {
 	p.content = append(p.content, genai.NewPartFromURI(
 		url, string(mime),
 	))
 	return p
 }
 
-func (p *contentBuilder) DocFile(mime xai.DocumentType, fileID string) xai.ContentBuilder {
+func (p *msgBuilder) DocFile(mime xai.DocumentType, fileID string) xai.MsgBuilder {
 	p.content = append(p.content, genai.NewPartFromURI(
 		fileID, string(mime),
 	))
 	return p
 }
 
-func (p *contentBuilder) Thinking(signature, thinking string) xai.ContentBuilder {
+func (p *msgBuilder) Part(part xai.Part) xai.MsgBuilder {
+	p.content = append(p.content, buildPart(part))
+	return p
+}
+
+func (p *msgBuilder) Thinking(v xai.Thinking) xai.MsgBuilder {
 	p.content = append(p.content, &genai.Part{
-		Text:             thinking,
-		ThoughtSignature: unsafe.Slice(unsafe.StringData(signature), len(signature)),
+		Text:             v.Text,
+		ThoughtSignature: unsafe.Slice(unsafe.StringData(v.Signature), len(v.Signature)),
 		Thought:          true,
 	})
 	return p
 }
 
-func (p *contentBuilder) RedactedThinking(data string) xai.ContentBuilder {
-	// TODO(xsw): validate data
-	return p
-}
-
-func (p *Provider) Contents() xai.ContentBuilder {
-	return &contentBuilder{}
-}
-
-func buildContents(in xai.ContentBuilder) []*genai.Part {
-	p := in.(*contentBuilder)
-	return p.content
+func (p *msgBuilder) Compaction(data string) xai.MsgBuilder {
+	panic("gemini does not support compaction")
 }
 
 // -----------------------------------------------------------------------------
@@ -141,8 +124,15 @@ func (p *textBuilder) Text(text string) xai.TextBuilder {
 	return p
 }
 
-func (p *Provider) Texts() xai.TextBuilder {
-	return &textBuilder{}
+func (p *Service) Texts(texts ...string) xai.TextBuilder {
+	var parts []*genai.Part
+	if len(texts) > 0 {
+		parts = make([]*genai.Part, len(texts))
+		for i, text := range texts {
+			parts[i] = genai.NewPartFromText(text)
+		}
+	}
+	return &textBuilder{parts: parts}
 }
 
 func buildTexts(in xai.TextBuilder) *genai.Content {
