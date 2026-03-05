@@ -14,21 +14,33 @@
  * limitations under the License.
  */
 
-package xaitest
+package openai
 
 import (
-	"context"
-	"testing"
-
 	xai "github.com/goplus/xai/spec"
+	"github.com/openai/openai-go/v3/option"
 )
 
-// Do runs the test cases for xai.
-func Do(t *testing.T, ctx context.Context, uri string) {
-	ai, err := xai.New(ctx, uri)
-	if err != nil {
-		t.Fatalf("failed to create xai client: %v\n", err)
-	}
-	// TODO(xsw): implement test cases for xai.
-	_ = ai
+// -----------------------------------------------------------------------------
+
+type options struct {
+	opts []option.RequestOption
 }
+
+func (p *options) WithBaseURL(base string) xai.OptionBuilder {
+	p.opts = append(p.opts, option.WithBaseURL(base))
+	return p
+}
+
+func (p *Service) Options() xai.OptionBuilder {
+	return &options{}
+}
+
+func buildOptions(opts xai.OptionBuilder) (ret []option.RequestOption) {
+	if p, ok := opts.(*options); ok {
+		ret = p.opts
+	}
+	return
+}
+
+// -----------------------------------------------------------------------------
